@@ -6,17 +6,15 @@ import gym
 
 import torch
 from torch.utils.data import Dataset
-from torch import nn
 
 from pixel_wrapper import PixelObservationWrapper
+import wrappers
 
-import sys
-sys.path.insert(0, '../envs')
-import reacher_family
 
 class GymData(Dataset):
-    def __init__(self, env_name, traj_len, cache_size=100000, qpos_only=False, qpos_qvel=False, delta=True, whiten=True, pixels=False, source_img_width=64):
-        self.env_name = env_name
+    def __init__(self, env_name, traj_len, cache_size=100000, qpos_only=False, qpos_qvel=False, delta=True, whiten=True,
+                 pixels=False, source_img_width=64, seed=None):
+        self.suite, self.task = env_name.split('_', 1)
         self.traj_len = traj_len
         self.qpos_only = qpos_only
         self.qpos_qvel = qpos_qvel
@@ -26,6 +24,7 @@ class GymData(Dataset):
         self.source_img_width = source_img_width
         self.cache_size = cache_size
         self.cache = {}
+        self.seed = seed
 
         self.done = False
         self.env_has_been_reset = False
@@ -41,20 +40,21 @@ class GymData(Dataset):
         stat_samples = min(self.env_max_steps * 1000, 100000)
         print("Generating samples for computing statistics.")
         for i in range(stat_samples):
-            if i % 10000 == 0: print("{}/{}".format(i, stat_samples))
+            if i % 10000 == 0:
+                print("{}/{}".format(i, stat_samples))
             state, _ = self[i]
             states.append(state)
         states = torch.cat(states, 0)
         self.mean, self.std = states.mean(dim=0), states.std(dim=0)
         self.std[self.std == 0] = 1
 
-
     # a large number so we never re-instantiate a worker
     def __len__(self):
         return int(1e8)
 
-
     def get_obs(self):
+        if self.suite == 'dmc':
+            return self.env.observation()
         if self.qpos_only:
             return np.copy(self.env.sim.data.qpos)
         elif self.qpos_qvel:
@@ -66,10 +66,14 @@ class GymData(Dataset):
         else:
             return np.copy(self.env._get_obs())
 
-
     def make_env(self):
-        self.env = gym.make(self.env_name)
+        if self.suite == 'dmc':
+            task = wrappers.DeepMindControl(self.task, seed=self.seed)
+            self.env = wrappers.TimeLimit(task, 1000)
+        elif self.suite == 'gym':
+            self.env = gym.make(self.task)
         self.env_max_steps = self.env._max_episode_steps
+
         if hasattr(self.env, 'unwrapped'):
             self.env = self.env.unwrapped
 
@@ -80,7 +84,6 @@ class GymData(Dataset):
         # burn some steps to prevent workers from being correlated
         for _ in range(random.randrange(0, 10)):
             obs, act = self.generate_trajectory()
-
 
     def generate_trajectory(self):
         if self.done or self.steps_since_reset >= self.env_max_steps:
@@ -109,11 +112,9 @@ class GymData(Dataset):
 
         return obs, actions
 
-
     def __getitem__(self, i):
         if not self.env_has_been_reset:
             self.make_env()
-            self.env.seed(torch.initial_seed())
             self.env_has_been_reset = True
 
         i = i % self.cache_size
@@ -132,13 +133,14 @@ class GymData(Dataset):
 
 def data_path(env_name, traj_len, cache_size, qpos_only, qpos_qvel, delta, whiten, pixels, source_img_width):
     name = "{}_len{}_n{}_qpos{}_qvel{}_delta{}_whiten{}_pixels{}".format(
-            env_name, traj_len, cache_size, qpos_only, qpos_qvel, delta, whiten, pixels)
+        env_name, traj_len, cache_size, qpos_only, qpos_qvel, delta, whiten, pixels)
     if pixels:
         name += "_imgwidth{}".format(source_img_width)
     return 'data/{}.pt'.format(name)
 
+
 def generate_and_save(env_name, traj_len, cache_size=100000, qpos_only=False, qpos_qvel=False,
-            delta=True, whiten=True, pixels=False, source_img_width=64):
+                      delta=True, whiten=True, pixels=False, source_img_width=64):
     dataset = GymData(env_name, traj_len, cache_size, qpos_only, qpos_qvel, delta, whiten, pixels, source_img_width)
     print("Generating dataset to save.")
     for i in range(dataset.cache_size):
@@ -150,12 +152,14 @@ def generate_and_save(env_name, traj_len, cache_size=100000, qpos_only=False, qp
     torch.save(dataset, path)
     return dataset
 
+
 def load_or_generate(env_name, traj_len, cache_size=100000, qpos_only=False, qpos_qvel=False,
-            delta=True, whiten=True, pixels=False, source_img_width=64):
+                     delta=True, whiten=True, pixels=False, source_img_width=64):
     path = data_path(env_name, traj_len, cache_size, qpos_only, qpos_qvel, delta, whiten, pixels, source_img_width)
     try:
         print("Attempting to load data from {}".format(path))
         dataset = torch.load(path)
     except FileNotFoundError:
-        dataset = generate_and_save(env_name, traj_len, cache_size, qpos_only, qpos_qvel, delta, whiten, pixels, source_img_width)
+        dataset = generate_and_save(env_name, traj_len, cache_size, qpos_only, qpos_qvel, delta, whiten, pixels,
+                                    source_img_width)
     return dataset

@@ -8,6 +8,8 @@ import torch
 import torch.utils.data
 from torch import nn, optim
 from torch.nn import functional as F
+import wandb
+
 
 import util
 import gym_dataset
@@ -34,7 +36,7 @@ parser.add_argument('--norm-loss', type=float, default=1e-4)
 parser.add_argument('--layers', type=int, default=1)
 parser.add_argument('--dec-layers', type=int, default=1)
 parser.add_argument('--traj-len', type=int, default=4)
-parser.add_argument('--env', default='ReacherVertical-v2')
+parser.add_argument('--env', default='dmc_hopper_hop')
 parser.add_argument('--embed-every', type=int, default=10000)
 parser.add_argument('--decoder-epochs', type=int, default=10)
 args = parser.parse_args()
@@ -54,7 +56,7 @@ util.write_options(args, result_path)
 # builds a dataset by stepping a gym env with random actions
 dataset = gym_dataset.load_or_generate(args.env, args.traj_len,
                                        qpos_only=False,
-                                       qpos_qvel=True, )
+                                       qpos_qvel=False, )
 workers = 0
 
 train_loader = torch.utils.data.DataLoader(dataset,
@@ -74,6 +76,14 @@ embed_size = action_size
 
 model = ActionDynEVAE(args.layers, traj_size, embed_size, input_nelement).to(device)
 optimizer = optim.Adam(model.parameters(), lr=args.lr, amsgrad=True)
+
+wandb.init(project='dyne-training', entity='vinnibuh')
+config = {
+    "domain": "dmc",
+    "env": "hopper_hop",
+    "states": "low-dim"
+}
+wandb.config = config
 
 
 # Reconstruction + KL divergence losses summed over all elements and batch
@@ -120,12 +130,21 @@ def train(epoch):
                 epoch, batch_idx * len(states), epoch_size,
                        100. * batch_idx / len(train_loader),
                        loss.item() / len(states)))
+            wandb.log({'epoch_progress': 100. * batch_idx / len(train_loader)})
+            wandb.log({'mean batch loss': loss.item() / len(states)})
+            wandb.log({'mean batch likelihood': likelihood.item() / len(states)})
+            wandb.log({'mean batch kld': kld.item() / len(states)})
 
     print(('====> Epoch: {} Average loss: {:.4f}'
            '\tLL: {:.6f}\tKLD: {:.6f}').format(
         epoch, train_loss / epoch_size,
                train_likelihood / epoch_size,
                train_kld / epoch_size))
+    wandb.log({'epoch': epoch})
+    wandb.log({'mean epoch loss': train_loss/epoch_size})
+    wandb.log({'mean epoch likelihood': train_likelihood / epoch_size})
+    wandb.log({'mean epoch kld': train_kld / epoch_size})
+
     # print("qpos loss: {:.6f}, qvel_loss: {:.6f}".format(
     #     qpos_loss / epoch_size, qvel_loss / epoch_size))
 
@@ -210,6 +229,7 @@ def save_model():
 
 
 if __name__ == "__main__":
+
     for epoch in range(1, args.epochs + 1):
         train(epoch)
 
