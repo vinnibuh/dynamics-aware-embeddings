@@ -50,8 +50,8 @@ device = torch.device("cuda" if args.cuda else "cpu")
 
 result_path = path.join('results', args.env, args.name)
 render_path = path.join(result_path, 'render')
-os.makedirs(render_path, exist_ok=True)
-util.write_options(args, result_path)
+#os.makedirs(render_path, exist_ok=True)
+#util.write_options(args, result_path)
 
 # builds a dataset by stepping a gym env with random actions
 dataset = gym_dataset.load_or_generate(args.env, args.traj_len,
@@ -77,13 +77,13 @@ embed_size = action_size
 model = ActionDynEVAE(args.layers, traj_size, embed_size, input_nelement).to(device)
 optimizer = optim.Adam(model.parameters(), lr=args.lr, amsgrad=True)
 
-wandb.init(project='dyne-training', entity='vinnibuh')
+#wandb.init(project='dyne-training', entity='vinnibuh')
 config = {
     "domain": "dmc",
     "env": "hopper_hop",
     "states": "low-dim"
 }
-wandb.config = config
+#wandb.config = config
 
 
 # Reconstruction + KL divergence losses summed over all elements and batch
@@ -158,7 +158,7 @@ def sample_z_batch():
 
 
 # used to whiten the latent space before training the decoder
-def marginal_stats():
+def marginal_stats(path=None):
     zs = []
     for _ in range(1000):
         (states, actions) = next(train_iterator)
@@ -168,6 +168,8 @@ def marginal_stats():
     mean, std = zs.mean(dim=0), zs.std(dim=0)
     white_zs = (zs - mean) / std
     white_max = white_zs.abs().max()
+    if path:
+        torch.save((mean.detach(), std.detach(), white_max.detach()), path)
     return mean, std, white_max
 
 
@@ -229,10 +231,14 @@ def save_model():
 
 
 if __name__ == "__main__":
+    try:
+        import colored_traceback
 
-    for epoch in range(1, args.epochs + 1):
-        train(epoch)
+        colored_traceback.add_hook()
+    except ImportError:
+        pass
+    parser = argparse.ArgumentParser()
+    for key, value in define_config().items():
+        parser.add_argument(f'--{key}', type=tools.args_type(value), default=value)
+    main(parser.parse_args())
 
-    # always save at the end of training
-    save_model()
-    save_decoder()

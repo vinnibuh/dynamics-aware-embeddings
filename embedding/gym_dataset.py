@@ -1,6 +1,7 @@
 import random
 import numpy as np
 import os
+import pathlib
 
 import gym
 
@@ -130,6 +131,124 @@ class GymData(Dataset):
 
         return obs, action
 
+
+class AbstractActionsData(Dataset):
+    def __init__(self, env_name, traj_len, encoder, qpos_only=False, qpos_qvel=False, delta=True, whiten=True,
+                 pixels=False, source_img_width=64, seed=None):
+        self.suite, self.task = env_name.split('_', 1)
+        self.traj_len = traj_len
+        self.encoder = encoder
+        self.qpos_only = qpos_only
+        self.qpos_qvel = qpos_qvel
+        self.delta = delta
+        self.whiten = whiten
+        self.pixels = pixels
+        self.source_img_width = source_img_width
+        self.episodes = {}
+        self.mapping = {}
+        self.seed = seed
+
+        self.mean = 0
+        self.std = 1
+
+    # a large number so we never re-instantiate a worker
+    def __len__(self):
+        return len(self.episodes.keys())
+
+    def load_stats(self, directory):
+        mean_path = pathlib.Path(directory) / 'hopper_hop_mean.pt'
+        std_path = pathlib.Path(directory) / 'hopper_hop_std.pt'
+        with mean_path.open('rb') as f:
+            self.mean = torch.load(f)
+        with std_path.open('rb') as f:
+            self.std = torch.load(f)
+
+    def load_from_directory(self, directory):
+        directory = pathlib.Path(directory).expanduser()
+        for idx, filename in enumerate(directory.glob('*.npz')):
+            if filename not in self.mapping.keys():
+                try:
+                    with filename.open('rb') as f:
+                        episode = np.load(f)
+                        episode = {k: torch.from_numpy(episode[k]).float() for k in episode.keys()}
+                        episode['obs'] = torch.cat([episode['position'],
+                                                      episode['velocity'],
+                                                      episode['touch']], 1)
+                        episode.pop('position')
+                        episode.pop('velocity')
+                        episode.pop('touch')
+
+                        self.episodes[idx] = episode
+                        self.mapping[filename] = idx
+                except Exception as e:
+                    print(f'Could not load episode: {e}')
+                    continue
+
+    def transform_episode(self, i):
+        obs, action, rewards = self[i]
+
+        episode_size = obs.size(0)
+        obs_dim = obs.size(1)
+        action_dim = action.size(1)
+
+        obs_reshaped = obs[:-1].reshape([episode_size // self.traj_len,
+                                         self.traj_len,
+                                         obs_dim])
+        last_states = torch.unsqueeze(obs[4::4], 1)
+        obs = torch.repeat_interleave(torch.cat([obs_reshaped, last_states], 1), 2, dim=0)
+
+        action = action[1:].reshape([episode_size // self.traj_len,
+                                     self.traj_len,
+                                     action_dim])
+        action = torch.repeat_interleave(action, 2, dim=0)
+        with torch.no_grad():
+            pred_states, mu, logvar = self.encoder(obs[:, 0], action)
+
+        return mu, logvar
+
+    def __getitem__(self, i):
+        episode = self.episodes[i]
+        obs = episode['obs']
+        if self.delta:
+            delta_obs = torch.zeros_like(obs)
+            for i in range(1, obs.size(0)):
+                delta_obs[i] = obs[i] - obs[0]
+            obs = delta_obs
+
+        if self.whiten:
+            obs = (obs - self.mean) / self.std
+        return obs, episode['action'], episode['reward']
+
+def load_episodes(directory, rescan, length=None, balance=False, seed=0):
+    directory = pathlib.Path(directory).expanduser()
+    randomizer = np.random.RandomState(seed)
+    cache = {}
+    while True:
+        for filename in directory.glob('*.npz'):
+            if filename not in cache:
+                try:
+                    with filename.open('rb') as f:
+                        episode = np.load(f)
+                        episode = {k: episode[k] for k in episode.keys()}
+                except Exception as e:
+                    print(f'Could not load episode: {e}')
+                    continue
+                cache[filename] = episode
+        keys = list(cache.keys())
+        for index in randomizer.choice(len(keys), rescan):
+            episode = cache[keys[index]]
+            if length:
+                total = len(next(iter(episode.values())))
+                available = total - length
+                if available < 1:
+                    print(f'Skipped short episode of length {available}.')
+                    continue
+                if balance:
+                    index = min(randomizer.randint(0, total), available)
+                else:
+                    index = int(randomizer.randint(0, available))
+                episode = {k: v[index: index + length] for k, v in episode.items()}
+            yield episode
 
 def data_path(env_name, traj_len, cache_size, qpos_only, qpos_qvel, delta, whiten, pixels, source_img_width):
     name = "{}_len{}_n{}_qpos{}_qvel{}_delta{}_whiten{}_pixels{}".format(
