@@ -24,7 +24,6 @@ class ActionDynEVAE(nn.Module):
         ])
         self.fc4 = nn.Linear(self.hidden_size, input_nelement)
 
-
     # encode an action sequence into the embedding space
     def encode(self, x):
         x = x.view(-1, self.traj_size)
@@ -35,13 +34,6 @@ class ActionDynEVAE(nn.Module):
 
         return mu, log_sigma2
 
-
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5*logvar)
-        eps = torch.randn_like(std)
-        return eps.mul(std).add_(mu)
-
-
     # take the current state and an embedded action sequence
     # and predict s_{t+k}
     def decode(self, s, z):
@@ -51,8 +43,13 @@ class ActionDynEVAE(nn.Module):
             current = F.selu(layer(current))
         return self.fc4(current)
 
-
     def forward(self, s, a):
         mu, logvar = self.encode(a)
-        z = self.reparameterize(mu, logvar)
+        z = ActionDynEVAE.reparameterize(mu, logvar)
         return self.decode(s, z), mu, logvar
+
+    @staticmethod
+    def reparameterize(mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return eps.mul(std).add_(mu)

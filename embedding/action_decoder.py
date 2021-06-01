@@ -1,8 +1,7 @@
-import torch
-from torch import nn, optim
+from torch import nn
 from torch.nn import functional as F
 
-import util
+import embedding.util as util
 
 class ActionDecoder(nn.Module):
     def __init__(self, layers, embed_size, traj_len, action_space):

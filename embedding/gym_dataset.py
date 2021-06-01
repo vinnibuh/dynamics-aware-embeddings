@@ -1,31 +1,23 @@
 import random
 import numpy as np
-import os
 import pathlib
+import sys
 
 import gym
 
 import torch
 from torch.utils.data import Dataset
 
-from pixel_wrapper import PixelObservationWrapper
-import wrappers
+sys.path.append('.')
+from embedding.pixel_wrapper import PixelObservationWrapper
+import embedding.wrappers as wrappers
 
 
 class GymData(Dataset):
-    def __init__(self, env_name, traj_len, cache_size=100000, qpos_only=False, qpos_qvel=False, delta=True, whiten=True,
-                 pixels=False, source_img_width=64, seed=None):
-        self.suite, self.task = env_name.split('_', 1)
-        self.traj_len = traj_len
-        self.qpos_only = qpos_only
-        self.qpos_qvel = qpos_qvel
-        self.delta = delta
-        self.whiten = whiten
-        self.pixels = pixels
-        self.source_img_width = source_img_width
-        self.cache_size = cache_size
+    def __init__(self, config):
+        self._c = config
+        self.suite, self.task = self._c.env.split('_', 1)
         self.cache = {}
-        self.seed = seed
 
         self.done = False
         self.env_has_been_reset = False
@@ -33,7 +25,7 @@ class GymData(Dataset):
         self.make_env()
         self.mean = 0
         self.std = 1
-        if self.whiten:
+        if self._c.whiten:
             self.make_stats()
 
     def make_stats(self):
@@ -51,25 +43,25 @@ class GymData(Dataset):
 
     # a large number so we never re-instantiate a worker
     def __len__(self):
-        return int(1e8)
+        return self._c.dataset_size
 
     def get_obs(self):
         if self.suite == 'dmc':
             return self.env.observation()
-        if self.qpos_only:
+        if self._c.qpos_only:
             return np.copy(self.env.sim.data.qpos)
-        elif self.qpos_qvel:
+        elif self._c.qpos_qvel:
             qpos = np.copy(self.env.sim.data.qpos)
             qvel = np.copy(self.env.sim.data.qvel)
             return np.concatenate([qpos.flat, qvel.flat])
-        elif self.pixels:
+        elif self._c.pixels:
             return self.env.observation()
         else:
             return np.copy(self.env._get_obs())
 
     def make_env(self):
         if self.suite == 'dmc':
-            task = wrappers.DeepMindControl(self.task, seed=self.seed)
+            task = wrappers.DeepMindControl(self.task, seed=self._c.seed)
             self.env = wrappers.TimeLimit(task, 1000)
         elif self.suite == 'gym':
             self.env = gym.make(self.task)
@@ -78,8 +70,8 @@ class GymData(Dataset):
         if hasattr(self.env, 'unwrapped'):
             self.env = self.env.unwrapped
 
-        if self.pixels:
-            self.env = PixelObservationWrapper(self.env, source_img_width=self.source_img_width)
+        if self._c.pixels:
+            self.env = PixelObservationWrapper(self.env, source_img_width=self._c.source_img_width)
 
         self.env.reset()
         # burn some steps to prevent workers from being correlated
@@ -87,25 +79,25 @@ class GymData(Dataset):
             obs, act = self.generate_trajectory()
 
     def generate_trajectory(self):
-        if self.done or self.steps_since_reset >= self.env_max_steps:
+        if self.done or self.steps_since_reset >= self.env_max_steps - self._c.traj_len:
             self.env.reset()
             self.steps_since_reset = 0
             self.done = False
         obs = [self.get_obs()]
         actions = []
-        for _ in range(self.traj_len):
+        for _ in range(self._c.traj_len):
             action = self.env.action_space.sample()
             actions.append(action)
             _, _, step_done, _ = self.env.step(action)
             self.done = self.done or step_done
             obs.append(self.get_obs())
 
-        self.steps_since_reset += self.traj_len
+        self.steps_since_reset += self._c.traj_len
         actions = torch.stack([torch.from_numpy(a).float() for a in actions])
         obs = torch.stack([torch.from_numpy(o).float() for o in obs])
 
         # only predict change in state, not absolute state
-        if self.delta:
+        if self._c.delta:
             delta_obs = torch.zeros_like(obs)
             for i in range(1, obs.size(0)):
                 delta_obs[i] = obs[i] - obs[0]
@@ -118,7 +110,7 @@ class GymData(Dataset):
             self.make_env()
             self.env_has_been_reset = True
 
-        i = i % self.cache_size
+        i = i % self._c.dataset_size
         if i not in self.cache:
             self.cache[i] = self.generate_trajectory()
 
@@ -126,16 +118,16 @@ class GymData(Dataset):
 
         # whitening observations helps account for the difference in scale between
         # positions and velocities
-        if self.whiten:
+        if self._c.whiten:
             obs = (obs - self.mean) / self.std
 
         return obs, action
 
 
 class AbstractActionsData(Dataset):
-    def __init__(self, env_name, traj_len, encoder, qpos_only=False, qpos_qvel=False, delta=True, whiten=True,
+    def __init__(self, env, traj_len, encoder, qpos_only=False, qpos_qvel=False, delta=True, whiten=True,
                  pixels=False, source_img_width=64, seed=None):
-        self.suite, self.task = env_name.split('_', 1)
+        self.suite, self.task = env.split('_', 1)
         self.traj_len = traj_len
         self.encoder = encoder
         self.qpos_only = qpos_only
@@ -172,8 +164,8 @@ class AbstractActionsData(Dataset):
                         episode = np.load(f)
                         episode = {k: torch.from_numpy(episode[k]).float() for k in episode.keys()}
                         episode['obs'] = torch.cat([episode['position'],
-                                                      episode['velocity'],
-                                                      episode['touch']], 1)
+                                                    episode['velocity'],
+                                                    episode['touch']], 1)
                         episode.pop('position')
                         episode.pop('velocity')
                         episode.pop('touch')
@@ -219,6 +211,7 @@ class AbstractActionsData(Dataset):
             obs = (obs - self.mean) / self.std
         return obs, episode['action'], episode['reward']
 
+
 def load_episodes(directory, rescan, length=None, balance=False, seed=0):
     directory = pathlib.Path(directory).expanduser()
     randomizer = np.random.RandomState(seed)
@@ -250,35 +243,35 @@ def load_episodes(directory, rescan, length=None, balance=False, seed=0):
                 episode = {k: v[index: index + length] for k, v in episode.items()}
             yield episode
 
-def data_path(env_name, traj_len, cache_size, qpos_only, qpos_qvel, delta, whiten, pixels, source_img_width):
+
+def data_path(config):
     name = "{}_len{}_n{}_qpos{}_qvel{}_delta{}_whiten{}_pixels{}".format(
-        env_name, traj_len, cache_size, qpos_only, qpos_qvel, delta, whiten, pixels)
-    if pixels:
-        name += "_imgwidth{}".format(source_img_width)
-    return 'data/{}.pt'.format(name)
+        config.env, config.traj_len, config.dataset_size, config.qpos_only,
+        config.qpos_qvel, config.delta, config.whiten, config.pixels)
+    if config.pixels:
+        name += "_imgwidth{}".format(config.source_img_width)
+    return config.dataset_dir / 'torch' / '{}.pt'.format(name)
 
 
-def generate_and_save(env_name, traj_len, cache_size=100000, qpos_only=False, qpos_qvel=False,
-                      delta=True, whiten=True, pixels=False, source_img_width=64):
-    dataset = GymData(env_name, traj_len, cache_size, qpos_only, qpos_qvel, delta, whiten, pixels, source_img_width)
+def generate_and_save(config):
+    dataset = GymData(config)
     print("Generating dataset to save.")
-    for i in range(dataset.cache_size):
+    for i in range(config.dataset_size):
         _ = dataset[i]
-        if i % 10000 == 0: print("{}/{}".format(i, dataset.cache_size))
-    path = data_path(env_name, traj_len, cache_size, qpos_only, qpos_qvel, delta, whiten, pixels, source_img_width)
-    data_folder = os.path.dirname(path)
-    os.makedirs(data_folder, exist_ok=True)
+        if i % 10000 == 0:
+            print("{}/{}".format(i, len(dataset)))
+    path = data_path(config)
+    data_folder = path.parent
+    data_folder.mkdir(parents=True, exist_ok=True)
     torch.save(dataset, path)
     return dataset
 
 
-def load_or_generate(env_name, traj_len, cache_size=100000, qpos_only=False, qpos_qvel=False,
-                     delta=True, whiten=True, pixels=False, source_img_width=64):
-    path = data_path(env_name, traj_len, cache_size, qpos_only, qpos_qvel, delta, whiten, pixels, source_img_width)
+def load_or_generate(config):
+    path = data_path(config)
     try:
         print("Attempting to load data from {}".format(path))
         dataset = torch.load(path)
     except FileNotFoundError:
-        dataset = generate_and_save(env_name, traj_len, cache_size, qpos_only, qpos_qvel, delta, whiten, pixels,
-                                    source_img_width)
+        dataset = generate_and_save(config)
     return dataset

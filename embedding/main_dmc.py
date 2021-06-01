@@ -50,8 +50,8 @@ device = torch.device("cuda" if args.cuda else "cpu")
 
 result_path = path.join('results', args.env, args.name)
 render_path = path.join(result_path, 'render')
-#os.makedirs(render_path, exist_ok=True)
-#util.write_options(args, result_path)
+os.makedirs(render_path, exist_ok=True)
+util.write_options(args, result_path)
 
 # builds a dataset by stepping a gym env with random actions
 dataset = gym_dataset.load_or_generate(args.env, args.traj_len,

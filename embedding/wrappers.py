@@ -1,12 +1,10 @@
 import atexit
 import functools
 import sys
-import threading
 import traceback
 
 import gym
 import numpy as np
-from PIL import Image
 from dm_control import suite
 
 
