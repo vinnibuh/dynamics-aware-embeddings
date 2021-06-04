@@ -179,22 +179,24 @@ class AbstractActionsData(Dataset):
     def transform_episode(self, i):
         obs, action, rewards = self[i]
 
-        episode_size = obs.size(0)
-        obs_dim = obs.size(1)
+        # account for action repeat and first zero action
+        obs = torch.repeat_interleave(obs, 2, dim=0)[:-1]
+        action = torch.repeat_interleave(action[1:], 2, dim=0)
+
         action_dim = action.size(1)
 
-        obs_reshaped = obs[:-1].reshape([episode_size // self.traj_len,
-                                         self.traj_len,
-                                         obs_dim])
-        last_states = torch.unsqueeze(obs[4::4], 1)
-        obs = torch.repeat_interleave(torch.cat([obs_reshaped, last_states], 1), 2, dim=0)
+        # account for not completely divisible sizes of episodes
+        initial_episode_size = action.size(0)
+        actual_episode_size = initial_episode_size - (initial_episode_size % self.traj_len)
+        obs = obs[:actual_episode_size]
+        action = action[:actual_episode_size]
 
-        action = action[1:].reshape([episode_size // self.traj_len,
-                                     self.traj_len,
-                                     action_dim])
-        action = torch.repeat_interleave(action, 2, dim=0)
+        first_states = obs[:actual_episode_size][::self.traj_len]
+        action = action.reshape([actual_episode_size // self.traj_len,
+                                 self.traj_len,
+                                 action_dim])
         with torch.no_grad():
-            pred_states, mu, logvar = self.encoder(obs[:, 0], action)
+            pred_states, mu, logvar = self.encoder(first_states, action)
 
         return mu, logvar
 
