@@ -378,7 +378,7 @@ def conv_out_dim(in_planes, out_planes, in_height, in_width, kernel_size,
         (in_height + 2 * padding - dilated_kernel - 1) / stride + 1)
     out_width = math.floor(
         (in_width + 2 * padding - dilated_kernel - 1) / stride + 1)
-    return out_planes, out_height, out_width
+    return out_height, out_width
 
 
 def conv_in_dim(out_height, out_width, kernel_size,
@@ -465,3 +465,15 @@ def write_options(config, location):
         print(serial_opt)
         f.write(serial_opt)
         f.flush()
+
+
+def noise_action(action, action_space, noise_amount):
+    if noise_amount == 0:
+        return action
+
+    noise = np.random.normal(0, noise_amount, size=action_space.shape[0])
+    noised_action = action + noise
+
+    # now clip it
+    noised_action = noised_action.clip(action_space.low, action_space.high)
+    return noised_action

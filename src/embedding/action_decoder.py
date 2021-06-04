@@ -1,7 +1,8 @@
 from torch import nn
 from torch.nn import functional as F
 
-import embedding.util as util
+import src.utils.util as util
+
 
 class ActionDecoder(nn.Module):
     def __init__(self, layers, embed_size, traj_len, action_space):

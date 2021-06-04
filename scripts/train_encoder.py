@@ -11,9 +11,9 @@ import numpy as np
 import wandb
 
 sys.path.append('.')
-import embedding.util as util
-import embedding.gym_dataset as gym_dataset
-from embedding.vae_dyne_action import ActionDynEVAE
+import src.utils.util as util
+import src.embedding.gym_dataset as gym_dataset
+from src.embedding.vae_dyne_action import ActionDynEVAE
 
 
 def define_config():

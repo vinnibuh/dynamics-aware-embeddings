@@ -9,8 +9,7 @@ import torch
 from torch.utils.data import Dataset
 
 sys.path.append('.')
-from embedding.pixel_wrapper import PixelObservationWrapper
-import embedding.wrappers as wrappers
+import src.utils.wrappers as wrappers
 
 
 class GymData(Dataset):
@@ -71,7 +70,7 @@ class GymData(Dataset):
             self.env = self.env.unwrapped
 
         if self._c.pixels:
-            self.env = PixelObservationWrapper(self.env, source_img_width=self._c.source_img_width)
+            self.env = wrappers.PixelObservationWrapper(self.env, source_img_width=self._c.source_img_width)
 
         self.env.reset()
         # burn some steps to prevent workers from being correlated

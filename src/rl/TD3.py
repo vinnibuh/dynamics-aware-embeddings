@@ -1,14 +1,7 @@
-import numpy as np
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
 import torch.nn.functional as F
-import utils
 
-from torch.utils.data import DataLoader
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# device = "cpu"
 
 # Implementation of Twin Delayed Deep Deterministic Policy Gradients (TD3)
 # Paper: https://arxiv.org/abs/1802.09477
@@ -23,7 +16,6 @@ class Actor(nn.Module):
         self.l3 = nn.Linear(300, action_dim)
 
         self.max_action = max_action
-
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -51,7 +43,6 @@ class Critic(nn.Module):
         self.l5 = nn.Linear(400, 300)
         self.l6 = nn.Linear(300, 1)
 
-
     def forward(self, x, u):
         xu = torch.cat([x, u.repeat([1, self.action_repeat])], dim=1)
 
@@ -64,7 +55,6 @@ class Critic(nn.Module):
         x2 = self.l6(x2)
         return x1, x2
 
-
     def Q1(self, x, u):
         xu = torch.cat([x, u.repeat([1, self.action_repeat])], dim=1)
         # xu = torch.cat([x, u], 1)
@@ -76,43 +66,51 @@ class Critic(nn.Module):
 
 
 class TD3(object):
-    def __init__(self, state_dim, action_dim, max_action):
-        self.actor = Actor(state_dim, action_dim, max_action).to(device)
-        self.actor_target = Actor(state_dim, action_dim, max_action).to(device)
+    def __init__(self, state_dim, action_dim, max_action, device="cuda"):
+        self.device = torch.device(device)
+        self.actor = Actor(state_dim, action_dim, max_action).to(self.device)
+        self.actor_target = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters())
 
-        self.critic = Critic(state_dim, action_dim).to(device)
-        self.critic_target = Critic(state_dim, action_dim).to(device)
+        self.critic = Critic(state_dim, action_dim).to(self.device)
+        self.critic_target = Critic(state_dim, action_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters())
 
         self.max_action = max_action
 
-
     def select_action(self, state):
-        state = torch.FloatTensor(state.reshape(1, -1)).to(device)
+        state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
         return self.actor(state).cpu().data.numpy().flatten()
 
     # regular TD3 is stateless; add this to conform to API
     def reset(self):
         pass
 
+    def train(self, replay_buffer, iterations, batch_size=100, discount=0.99, tau=0.005, policy_noise=0.2,
+              noise_clip=0.5, policy_freq=2, config=None):
 
-    def train(self, replay_buffer, iterations, batch_size=100, discount=0.99, tau=0.005, policy_noise=0.2, noise_clip=0.5, policy_freq=2):
+        if config is not None:
+            batch_size = config.batch_size
+            discount = config.discount
+            tau = config.tau
+            policy_noise = config.policy_noise
+            noise_clip = config.noise_clip
+            policy_freq = config.policy_freq
 
         for it in range(iterations):
 
             # Sample replay buffer
             x, y, u, r, d = replay_buffer.sample(batch_size)
-            state = torch.FloatTensor(x).to(device)
-            action = torch.FloatTensor(u).to(device)
-            next_state = torch.FloatTensor(y).to(device)
-            done = torch.FloatTensor(1 - d).to(device)
-            reward = torch.FloatTensor(r).to(device)
+            state = torch.FloatTensor(x).to(self.device)
+            action = torch.FloatTensor(u).to(self.device)
+            next_state = torch.FloatTensor(y).to(self.device)
+            done = torch.FloatTensor(1 - d).to(self.device)
+            reward = torch.FloatTensor(r).to(self.device)
 
             # Select action according to policy and add clipped noise
-            noise = torch.FloatTensor(action.size()).data.normal_(0, policy_noise).to(device)
+            noise = torch.FloatTensor(action.size()).data.normal_(0, policy_noise).to(self.device)
             noise = noise.clamp(-noise_clip, noise_clip)
             next_action = (self.actor_target(next_state) + noise).clamp(-self.max_action, self.max_action)
 
@@ -150,23 +148,28 @@ class TD3(object):
                 for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                     target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
-
     def save(self, filename, directory):
-        torch.save(self.actor.state_dict(), '%s/%s_actor.pth' % (directory, filename))
-        torch.save(self.critic.state_dict(), '%s/%s_critic.pth' % (directory, filename))
-        torch.save(self, '%s/%s_all.pth' % (directory, filename))
-
+        actor_name = '{}_actor.pth'.format(filename)
+        critic_name = '{}_critic.pth'.format(filename)
+        variables_name = '{}_variables.pth'.format(filename)
+        torch.save(self.actor.state_dict(), directory / actor_name)
+        torch.save(self.critic.state_dict(), directory / critic_name)
+        torch.save(self, directory / variables_name)
 
     def load(self, filename, directory):
+        actor_name = '{}_actor.pth'.format(filename)
+        critic_name = '{}_critic.pth'.format(filename)
         if not torch.cuda.is_available():
-            self.actor.load_state_dict(torch.load('%s/%s_actor.pth' % (directory, filename), map_location='cpu'))
-            self.critic.load_state_dict(torch.load('%s/%s_critic.pth' % (directory, filename), map_location='cpu'))
+            self.actor.load_state_dict(torch.load(directory / actor_name, map_location='cpu'))
+            self.critic.load_state_dict(torch.load(directory / critic_name, map_location='cpu'))
         else:
-            self.actor.load_state_dict(torch.load('%s/%s_actor.pth' % (directory, filename)))
-            self.critic.load_state_dict(torch.load('%s/%s_critic.pth' % (directory, filename)))
+            self.actor.load_state_dict(torch.load(directory / actor_name))
+            self.critic.load_state_dict(torch.load(directory / critic_name))
+
 
 def load(filename, directory):
+    variables_name = '{}_variables.pth'.format(filename)
     if not torch.cuda.is_available():
-        return torch.load('%s/%s_all.pth' % (directory, filename), map_location='cpu')
+        return torch.load(directory / variables_name, map_location='cpu')
     else:
-        return torch.load('%s/%s_all.pth' % (directory, filename))
+        return torch.load(directory / variables_name)

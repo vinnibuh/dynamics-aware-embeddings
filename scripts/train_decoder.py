@@ -11,9 +11,9 @@ import numpy as np
 import wandb
 
 sys.path.append('.')
-import embedding.util as util
-import embedding.gym_dataset as gym_dataset
-from embedding.action_decoder import ActionDecoder
+import src.utils.util as util
+import src.embedding.gym_dataset as gym_dataset
+from src.embedding.action_decoder import ActionDecoder
 
 
 def define_config():
