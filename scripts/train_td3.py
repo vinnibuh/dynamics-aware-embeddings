@@ -118,7 +118,7 @@ def main(config):
         task = wrappers.DeepMindControl(task, seed=config.seed)
         env = wrappers.TimeLimit(task, 1000)
     elif suite == 'gym':
-        env = gym.make(config.task)
+        env = gym.make(task)
         env.seed(config.seed)
     else:
         raise ValueError('Unsupported type of environment')
