@@ -76,11 +76,10 @@ class Collect:
 
     def step(self, action):
         obs, reward, done, info = self._env.step(action)
-        obs = {k: self._convert(v) for k, v in obs.items()}
-        transition = obs.copy()
-        transition['action'] = action
-        transition['reward'] = reward
-        transition['discount'] = info.get('discount', np.array(1 - float(done)))
+        transition = {'obs': obs,
+                      'action': action,
+                      'reward': reward,
+                      'discount': info.get('discount', np.array(1 - float(done)))}
         self._episode.append(transition)
         if done:
             episode = {k: [t[k] for t in self._episode] for k in self._episode[0]}
@@ -92,10 +91,10 @@ class Collect:
 
     def reset(self):
         obs = self._env.reset()
-        transition = obs.copy()
-        transition['action'] = np.zeros(self._env.action_space.shape)
-        transition['reward'] = 0.0
-        transition['discount'] = 1.0
+        transition = {'obs': obs,
+                      'action': np.zeros(self._env.action_space.shape),
+                      'reward': 0.0,
+                      'discount': 1.0}
         self._episode = [transition]
         return obs
 

@@ -273,6 +273,6 @@ def load_or_generate(config):
     try:
         print("Attempting to load data from {}".format(path))
         dataset = torch.load(path)
-    except FileNotFoundError:
+    except (FileNotFoundError, ModuleNotFoundError):
         dataset = generate_and_save(config)
     return dataset

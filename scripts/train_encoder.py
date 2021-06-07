@@ -155,10 +155,11 @@ def main(config):
                     loss.item() / config.batch_size))
                 temp_size = (batch_idx - temp_batch) * config.batch_size
                 temp_batch = batch_idx
-                wandb.log({'epoch_progress': 100. * batch_idx / len(train_loader)})
-                wandb.log({'mean batch loss': temp_loss / temp_size})
-                wandb.log({'mean batch likelihood': temp_likelihood / temp_size})
-                wandb.log({'mean batch kld': temp_kld / temp_size})
+                if config.wandb:
+                    wandb.log({'epoch_progress': 100. * batch_idx / len(train_loader)})
+                    wandb.log({'mean batch loss': temp_loss / temp_size})
+                    wandb.log({'mean batch likelihood': temp_likelihood / temp_size})
+                    wandb.log({'mean batch kld': temp_kld / temp_size})
                 temp_loss = 0
                 temp_likelihood = 0
                 temp_kld = 0
@@ -168,10 +169,11 @@ def main(config):
             epoch, train_loss / epoch_size,
                    train_likelihood / epoch_size,
                    train_kld / epoch_size))
-        wandb.log({'epoch': epoch})
-        wandb.log({'mean epoch loss': train_loss / epoch_size})
-        wandb.log({'mean epoch likelihood': train_likelihood / epoch_size})
-        wandb.log({'mean epoch kld': train_kld / epoch_size})
+        if config.wandb:
+            wandb.log({'epoch': epoch})
+            wandb.log({'mean epoch loss': train_loss / epoch_size})
+            wandb.log({'mean epoch likelihood': train_likelihood / epoch_size})
+            wandb.log({'mean epoch kld': train_kld / epoch_size})
 
         print("qpos loss: {:.6f}, qvel_loss: {:.6f}".format(
             qpos_loss / epoch_size, qvel_loss / epoch_size))

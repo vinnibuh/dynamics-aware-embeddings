@@ -1,5 +1,9 @@
+import datetime
 import functools
+import io
 import os
+import uuid
+
 import math
 import sys
 import shutil
@@ -477,3 +481,25 @@ def noise_action(action, action_space, noise_amount):
     # now clip it
     noised_action = noised_action.clip(action_space.low, action_space.high)
     return noised_action
+
+
+def count_episodes(directory):
+    filenames = directory.glob('*.npz')
+    lengths = [int(n.stem.rsplit('-', 1)[-1]) - 1 for n in filenames]
+    episodes, steps = len(lengths), sum(lengths)
+    return episodes, steps
+
+
+def save_episodes(directory, episodes):
+    directory = pathlib.Path(directory).expanduser()
+    directory.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime('%Y%m%dT%H%M%S')
+    for episode in episodes:
+        identifier = str(uuid.uuid4().hex)
+        length = len(episode['reward'])
+        filename = directory / f'{timestamp}-{identifier}-{length}.npz'
+        with io.BytesIO() as f1:
+            np.savez_compressed(f1, **episode)
+            f1.seek(0)
+            with filename.open('wb') as f2:
+                f2.write(f1.read())
