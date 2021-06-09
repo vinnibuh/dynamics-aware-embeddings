@@ -124,11 +124,12 @@ class GymData(Dataset):
 
 
 class AbstractActionsData(Dataset):
-    def __init__(self, env, traj_len, encoder, qpos_only=False, qpos_qvel=False, delta=True, whiten=True,
+    def __init__(self, env, traj_len, encoder, action_repeat=2, qpos_only=False, qpos_qvel=False, delta=True, whiten=True,
                  pixels=False, source_img_width=64, seed=None):
         self.suite, self.task = env.split('_', 1)
         self.traj_len = traj_len
         self.encoder = encoder
+        self.action_repeat = action_repeat
         self.qpos_only = qpos_only
         self.qpos_qvel = qpos_qvel
         self.delta = delta
@@ -154,7 +155,7 @@ class AbstractActionsData(Dataset):
         with std_path.open('rb') as f:
             self.std = torch.load(f)
 
-    def load_from_directory(self, directory):
+    def load_from_directory(self, directory, images=True):
         directory = pathlib.Path(directory).expanduser()
         for idx, filename in enumerate(directory.glob('*.npz')):
             if filename not in self.mapping.keys():
@@ -162,13 +163,19 @@ class AbstractActionsData(Dataset):
                     with filename.open('rb') as f:
                         episode = np.load(f)
                         episode = {k: torch.from_numpy(episode[k]).float() for k in episode.keys()}
-                        episode['obs'] = torch.cat([episode['position'],
-                                                    episode['velocity'],
-                                                    episode['touch']], 1)
-                        episode.pop('position')
-                        episode.pop('velocity')
-                        episode.pop('touch')
-
+                        if self.suite == 'dmc':
+                            episode['obs'] = torch.cat([episode['position'],
+                                                        episode['velocity'],
+                                                        episode['touch']], 1)
+                            episode.pop('position')
+                            episode.pop('velocity')
+                            episode.pop('touch')
+                            if not images:
+                                episode.pop('image')
+                        elif self.suite == 'gym':
+                            pass
+                        else:
+                            raise NotImplementedError("This type of env is not supported")
                         self.episodes[idx] = episode
                         self.mapping[filename] = idx
                 except Exception as e:
@@ -179,8 +186,8 @@ class AbstractActionsData(Dataset):
         obs, action, rewards = self[i]
 
         # account for action repeat and first zero action
-        obs = torch.repeat_interleave(obs, 2, dim=0)[:-1]
-        action = torch.repeat_interleave(action[1:], 2, dim=0)
+        obs = torch.repeat_interleave(obs, self.action_repeat, dim=0)
+        action = torch.repeat_interleave(action[1:], self.action_repeat, dim=0)
 
         action_dim = action.size(1)
 
@@ -197,7 +204,7 @@ class AbstractActionsData(Dataset):
         with torch.no_grad():
             pred_states, mu, logvar = self.encoder(first_states, action)
 
-        return mu, logvar
+        return mu, logvar, pred_states
 
     def __getitem__(self, i):
         episode = self.episodes[i]

@@ -11,6 +11,8 @@ class ActionDecoder(nn.Module):
         self.action_space = action_space
         self.embed_dim = embed_size
         self.max_embedding = None
+        self.mean_z = None
+        self.std_z = None
 
         traj_size = util.prod(self.action_space.shape) * self.traj_len
 

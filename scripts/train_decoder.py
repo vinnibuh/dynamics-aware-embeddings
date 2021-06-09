@@ -190,6 +190,8 @@ def main(config):
         wandb.log({'mean epoch norm loss': decoder_norm_loss / epoch_size})
 
     # z_stats[2] is the max
+    decoder.mean_z = z_stats[0]
+    decoder.std_z = z_stats[1]
     decoder.max_embedding = z_stats[2]
     torch.save(decoder, decoder_path / 'decoder.pt')
 
