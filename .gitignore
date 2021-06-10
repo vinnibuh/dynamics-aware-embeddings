@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+#MuJoCo license
+mjkey.txt
+
 # Distribution / packaging
 .Python
 build/
