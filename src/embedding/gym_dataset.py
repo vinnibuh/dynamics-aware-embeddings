@@ -164,12 +164,20 @@ class AbstractActionsData(Dataset):
                         episode = np.load(f)
                         episode = {k: torch.from_numpy(episode[k]).float() for k in episode.keys()}
                         if self.suite == 'dmc':
-                            episode['obs'] = torch.cat([episode['position'],
-                                                        episode['velocity'],
-                                                        episode['touch']], 1)
-                            episode.pop('position')
-                            episode.pop('velocity')
-                            episode.pop('touch')
+                            if self.task == 'hopper_hop':
+                                episode['obs'] = torch.cat([episode['position'],
+                                                            episode['velocity'],
+                                                            episode['touch']], 1)
+                                episode.pop('position')
+                                episode.pop('velocity')
+                                episode.pop('touch')
+                            if self.task == 'walker_walk':
+                                episode['obs'] = torch.cat([episode['orientations'],
+                                                            torch.unsqueeze(episode['height'], 1),
+                                                            episode['velocity']], 1)
+                                episode.pop('orientations')
+                                episode.pop('height')
+                                episode.pop('velocity')
                             if not images:
                                 episode.pop('image')
                         elif self.suite == 'gym':
