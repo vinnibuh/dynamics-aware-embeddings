@@ -27,4 +27,5 @@ RUN pip3 install gym
 RUN pip3 install mujoco-py==2.0.2.8
 
 RUN pip3 install git+git://github.com/deepmind/dm_control.git
+RUN pip3 install 'dvc[gdrive]' --ignore-installed ruamel.yaml
 COPY . .
