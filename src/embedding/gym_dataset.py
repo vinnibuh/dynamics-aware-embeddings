@@ -164,14 +164,14 @@ class AbstractActionsData(Dataset):
                         episode = np.load(f)
                         episode = {k: torch.from_numpy(episode[k]).float() for k in episode.keys()}
                         if self.suite == 'dmc':
-                            if self.task == 'hopper_hop':
+                            if 'hopper' in self.task:
                                 episode['obs'] = torch.cat([episode['position'],
                                                             episode['velocity'],
                                                             episode['touch']], 1)
                                 episode.pop('position')
                                 episode.pop('velocity')
                                 episode.pop('touch')
-                            if self.task == 'walker_walk':
+                            if 'walker' in self.task:
                                 episode['obs'] = torch.cat([episode['orientations'],
                                                             torch.unsqueeze(episode['height'], 1),
                                                             episode['velocity']], 1)
