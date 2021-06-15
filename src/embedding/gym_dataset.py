@@ -129,6 +129,7 @@ class AbstractActionsData(Dataset):
         self.suite, self.task = env.split('_', 1)
         self.traj_len = traj_len
         self.encoder = encoder
+        self.device = next(encoder.parameters()).device
         self.action_repeat = action_repeat
         self.qpos_only = qpos_only
         self.qpos_qvel = qpos_qvel
@@ -210,9 +211,11 @@ class AbstractActionsData(Dataset):
                                  self.traj_len,
                                  action_dim])
         with torch.no_grad():
+            first_states = first_states.to(self.device)
+            action = action.to(self.device)
             pred_states, mu, logvar = self.encoder(first_states, action)
 
-        return mu, logvar, pred_states
+        return mu.cpu(), logvar.cpu(), pred_states.cpu()
 
     def __getitem__(self, i):
         episode = self.episodes[i]

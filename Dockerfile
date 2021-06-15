@@ -21,10 +21,12 @@ ENV LD_LIBRARY_PATH /root/.mujoco/mujoco200_linux/bin:${LD_LIBRARY_PATH}
 ENV LD_LIBRARY_PATH=/root/.mujoco/mujoco200/bin:$LD_LIBRARY_PATH
 ENV LD_LIBRARY_PATH /usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
 RUN pip3 install pandas
+RUN pip3 install scikit-image
 RUN pip3 install wandb
 RUN pip3 install matplotlib
 RUN pip3 install gym
 RUN pip3 install mujoco-py==2.0.2.8
+RUN conda install -c conda-forge multicore-tsne
 
 RUN pip3 install git+git://github.com/deepmind/dm_control.git
 RUN pip3 install 'dvc[gdrive]' --ignore-installed ruamel.yaml
