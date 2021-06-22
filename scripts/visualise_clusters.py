@@ -27,7 +27,7 @@ def define_config():
 
     # Dataset parameters
     config.env = 'dmc_hopper_hop'
-    config.encoder_env = None
+    config.encoder_env = ''
     config.encoder_name = 'DynE-4'
     config.traj_len = 4
     config.dataset_size = int(1e5)
