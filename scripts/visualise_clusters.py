@@ -27,6 +27,7 @@ def define_config():
 
     # Dataset parameters
     config.env = 'dmc_hopper_hop'
+    config.encoder_env = None
     config.encoder_name = 'DynE-4'
     config.traj_len = 4
     config.dataset_size = int(1e5)
@@ -217,7 +218,8 @@ def main(config):
     random.seed(config.seed)
     np.random.seed(config.seed)
 
-    encoder_path = config.models_dir / 'encoder' / config.env / config.encoder_name / 'encoder.pt'
+    encoder_env = config.encoder_env or config.env
+    encoder_path = config.models_dir / 'encoder' / encoder_env / config.encoder_name / 'encoder.pt'
     episodes_path = config.episodes_dir / 'episodes'
     images_path = config.log_dir / 'clusters' / config.env / config.encoder_name
     images_path.mkdir(parents=True, exist_ok=True)
