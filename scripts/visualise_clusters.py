@@ -3,6 +3,7 @@ import sys
 import argparse
 import pathlib
 import random
+import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 from MulticoreTSNE import MulticoreTSNE as TSNE
@@ -35,6 +36,7 @@ def define_config():
     config.whiten = True
     config.pixels = False
     config.source_img_width = 64
+    config.discount = 0.99
 
     # Visualisation parameters
     config.a_text = 0
@@ -59,21 +61,26 @@ def vis_embeddings(label, embeddings, words=[], a_points=1, a_text=0.6, ax=None)
     ax.grid(True)
 
 
-def tsne_plot_2d(label, embeddings, color_style='time', rewards=[], a_points=1, size=15,
-                 log=False, wandb_label=None, ax=None, episodes_num=100):
+def tsne_plot_2d(label, embeddings, color_style='time', rewards=None, qvalues=None,
+                 a_points=1, size=15, ax=None,
+                 log=False, wandb_label=None, episodes_num=100):
     ax = plt if ax is None else ax
     if color_style == 'time':
-        colors = cm.coolwarm(np.linspace(0, 1, int(len(embeddings)/episodes_num)))
+        colors = cm.coolwarm(np.linspace(0, 1, int(len(embeddings) / episodes_num)))
         colors = np.tile(colors, (episodes_num, 1))
-    elif color_style == 'rewards':
+    elif color_style == 'rewards' and rewards is not None:
         rewards = np.array(rewards)
         scaled_rewards = rewards / rewards.max()
         colors = cm.coolwarm(scaled_rewards)
+    elif color_style == 'qvalues' and qvalues is not None:
+        qvalues = np.array(qvalues)
+        scaled_qvalues = qvalues / qvalues.max()
+        colors = cm.coolwarm(scaled_qvalues)
     elif color_style == 'episodes':
         colors = cm.coolwarm(np.linspace(0, 1, episodes_num))
-        colors = np.repeat(colors, int(len(embeddings)/episodes_num), 0)
-    x = embeddings[:,0]
-    y = embeddings[:,1]
+        colors = np.repeat(colors, int(len(embeddings) / episodes_num), 0)
+    x = embeddings[:, 0]
+    y = embeddings[:, 1]
     ax.scatter(x, y, s=size, c=colors, alpha=a_points, label=label)
     ax.legend(loc=2)
     ax.grid(True)
@@ -140,20 +147,26 @@ def compare_embeddings_in_group(config, data, n_samples, point_size=10, log=True
     initial_episode_size = raw_action.size(0)
     actual_episode_size = initial_episode_size - (initial_episode_size % config.traj_len)
 
-    rewards_ak = []
     embeddings_ak = []
+    rewards_ak = []
+    qvalues_ak = []
     for k in sample_idx:
         raw_obs, raw_action, raw_reward = data[k]
         raw_embeddings = torch.repeat_interleave(raw_action[1:], 2, dim=0)[:actual_episode_size] \
             .reshape([actual_episode_size // config.traj_len,
                       config.traj_len * action_dim])
 
-        rewards = torch.repeat_interleave(raw_reward[1:]/2, 2, dim=0)[:actual_episode_size] \
+        rewards = torch.repeat_interleave(raw_reward[1:] / 2, 2, dim=0)[:actual_episode_size] \
+            .reshape([actual_episode_size // config.traj_len,
+                      config.traj_len]).sum(axis=1)
+        qvalues = list(itertools.accumulate(raw_reward.flip(0), lambda t, x: t * config.discount + x))[::-1]
+        qvalues = torch.repeat_interleave(torch.Tensor(qvalues) / 2, 2, dim=0)[:actual_episode_size] \
             .reshape([actual_episode_size // config.traj_len,
                       config.traj_len]).sum(axis=1)
         for idx, vector in enumerate(raw_embeddings):
             embeddings_ak.append(vector.numpy())
             rewards_ak.append(rewards[idx])
+            qvalues_ak.append(qvalues[idx])
 
     tsne_ak_2d = TSNE(perplexity=30, n_components=2, init='random', n_iter=3500, random_state=32, n_jobs=8)
     embeddings_ak_2d = tsne_ak_2d.fit_transform(np.array(embeddings_ak))
@@ -167,7 +180,7 @@ def compare_embeddings_in_group(config, data, n_samples, point_size=10, log=True
     tsne_dyne_ak_2d = TSNE(perplexity=30, n_components=2, init='random', n_iter=3500, random_state=32, n_jobs=8)
     embeddings_dyne_ak_2d = tsne_dyne_ak_2d.fit_transform(np.array(dyne_emb_ak))
 
-    fig, axes = plt.subplots(2, 2, figsize=(20, 20), constrained_layout=True)
+    fig, axes = plt.subplots(3, 2, figsize=(20, 20), constrained_layout=True)
     tsne_plot_2d('raw actions by time'.format(config.env), embeddings_ak_2d,
                  color_style='time', rewards=rewards_ak, size=point_size,
                  log=False, ax=axes[0][0], episodes_num=n_samples)
@@ -183,6 +196,14 @@ def compare_embeddings_in_group(config, data, n_samples, point_size=10, log=True
     tsne_plot_2d('dyne actions by rewards', embeddings_dyne_ak_2d,
                  color_style='rewards', rewards=rewards_ak, size=point_size,
                  log=False, ax=axes[1][1], episodes_num=n_samples)
+
+    tsne_plot_2d('raw actions by Q-Values', embeddings_ak_2d,
+                 color_style='qvalues', qvalues=qvalues_ak, size=point_size,
+                 log=False, ax=axes[2][0], episodes_num=n_samples)
+
+    tsne_plot_2d('dyne actions by Q-Values', embeddings_dyne_ak_2d,
+                 color_style='qvalues', qvalues=qvalues_ak, size=point_size,
+                 log=False, ax=axes[2][1], episodes_num=n_samples)
 
     fig.suptitle("{}_DynE-{}".format(config.env, config.traj_len), fontsize=16)
     fig.savefig(images_path / "{}_emb_comparison_{}_samples.png".format(config.env, config.n_samples),
